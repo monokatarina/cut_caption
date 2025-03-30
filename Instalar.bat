@@ -37,7 +37,7 @@ if exist ffmpeg.zip (
 :: Criar atalho
 echo Criando atalho...
 echo @echo off > CutCaption.bat
-echo python "%~dp0video_processor.py" %%* >> CutCaption.bat
+echo python "%~dp0cut_caption.py" %%* >> CutCaption.bat
 
 echo.
 echo #########################################
