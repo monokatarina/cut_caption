@@ -78,7 +78,13 @@ For faster processing without subtitles, uncheck "Add subtitles"
 Smaller Whisper models (tiny, base) are faster but less accurate
 
 Adjust silence threshold to better match your video's audio characteristics
+
+
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+
 Versão em Português
 📹 Processador de Vídeo com Legendas Automáticas
 Aplicação em Python que processa vídeos automaticamente:
