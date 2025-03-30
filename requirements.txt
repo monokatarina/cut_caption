@@ -1,0 +1,11 @@
+# Requirements for Video Processor / Processador de Vídeo
+whisper==1.1.10
+moviepy==1.0.3
+pydub==0.25.1
+ffmpeg-python==0.2.0
+numpy==1.24.4
+tqdm==4.66.1
+torch==2.1.2
+torchaudio==2.1.2
+openai-whisper==20231117
+pillow==10.1.0
