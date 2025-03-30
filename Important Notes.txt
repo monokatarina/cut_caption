@@ -1,0 +1,52 @@
+Important Notes:
+FFmpeg Requirement:
+
+You still need to have FFmpeg installed system-wide
+
+On Windows, you can download it from https://ffmpeg.org/
+
+On Linux/Mac: sudo apt-get install ffmpeg or brew install ffmpeg
+
+Optional Dependencies:
+
+text
+Copy
+# For GPU acceleration (if available)
+torch==2.1.2+cu118 --index-url https://download.pytorch.org/whl/cu118
+Installation Command:
+
+bash
+Copy
+pip install -r requirements.txt
+Python Version:
+
+Requires Python 3.8 or higher
+
+Recommended: Python 3.10+
+
+
+Notas importantes:
+Requisitos do FFmpeg:
+
+Você ainda precisa ter o FFmpeg instalado em todo o sistema
+
+No Windows, você pode baixá-lo em https://ffmpeg.org/
+
+No Linux/Mac: sudo apt-get install ffmpeg ou brew install ffmpeg
+
+Dependências opcionais:
+
+text
+Copiar
+# Para aceleração de GPU (se disponível)
+torch==2.1.2+cu118 --index-url https://download.pytorch.org/whl/cu118
+Comando de instalação:
+
+bash
+Copiar
+pip install -r requirements.txt
+Versão do Python:
+
+Requer Python 3.8 ou superior
+
+Recomendado: Python 3.10+
