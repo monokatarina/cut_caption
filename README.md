@@ -41,7 +41,7 @@ Clone the repository:
 
 bash
 Copy
-git clone https://github.com/yourusername/video-processor.git
+git clone https://github.com/monokatarina/cut_caption.git
 cd video-processor
 Install dependencies:
 
@@ -127,7 +127,7 @@ Clone o repositório:
 
 bash
 Copy
-git clone https://github.com/seuusuario/processador-video.git
+git clone https://github.com/monokatarina/cut_caption.git
 cd processador-video
 Instale as dependências:
 
