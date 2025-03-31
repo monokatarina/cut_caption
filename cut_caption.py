@@ -14,6 +14,12 @@ import tempfile
 import shutil
 import atexit
 import matplotlib.font_manager as fm
+import json
+from pathlib import Path
+
+# Configurações constantes
+CONFIG_DIR = os.path.join(Path.home(), ".video_processor")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
 class TempFileManager:
     """Gerenciador de arquivos temporários com limpeza automática"""
@@ -185,6 +191,15 @@ class VideoProcessorApp:
         self._setup_ui()
         self._initialize_variables()
         
+        # Criar diretório de configuração se não existir
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        
+        # Carregar configurações automaticamente ao iniciar
+        self._load_auto_settings()
+        
+        # Configurar para salvar quando fechar a janela
+        root.protocol("WM_DELETE_WINDOW", self._on_close)
+        
     def _setup_ui(self):
         """Configura a interface gráfica"""
         self.style = ttk.Style()
@@ -205,22 +220,25 @@ class VideoProcessorApp:
         settings_frame = ttk.LabelFrame(main_frame, text="Configurações Básicas", padding=10)
         settings_frame.grid(row=2, column=0, columnspan=3, sticky=tk.EW, pady=5)
 
-        ttk.Label(settings_frame, text="Adicionar legendas:").grid(row=1, column=0, sticky=tk.W)
-        self.add_subtitles_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(settings_frame, variable=self.add_subtitles_var).grid(row=1, column=1, padx=5, sticky=tk.W)
-
         ttk.Label(settings_frame, text="Modelo Whisper:").grid(row=0, column=0, sticky=tk.W)
-        self.model_combo = ttk.Combobox(settings_frame, values=['tiny', 'base', 'small', 'medium', 'large'], 
-                                      state="readonly")
+        self.model_combo = ttk.Combobox(settings_frame, values=['tiny', 'base', 'small', 'medium', 'large'], state="readonly")
         self.model_combo.set('medium')
         self.model_combo.grid(row=0, column=1, padx=5, sticky=tk.W)
 
-        ttk.Label(settings_frame, text="Duração do Clip (s):").grid(row=0, column=2, sticky=tk.W)
+        ttk.Label(settings_frame, text="Usar GPU:").grid(row=0, column=2, sticky=tk.W)
+        self.use_gpu_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(settings_frame, variable=self.use_gpu_var).grid(row=0, column=3, padx=5, sticky=tk.W)
+
+        ttk.Label(settings_frame, text="Duração do Clip (s):").grid(row=0, column=4, sticky=tk.W)
         self.duration_entry = ttk.Entry(settings_frame, width=8)
         self.duration_entry.insert(0, "45")
-        self.duration_entry.grid(row=0, column=3, padx=5, sticky=tk.W)
+        self.duration_entry.grid(row=0, column=5, padx=5, sticky=tk.W)
         self.duration_entry.config(validate="key", 
             validatecommand=(self.duration_entry.register(self._validate_number), '%P'))
+
+        ttk.Label(settings_frame, text="Adicionar legendas:").grid(row=1, column=0, sticky=tk.W)
+        self.add_subtitles_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(settings_frame, variable=self.add_subtitles_var).grid(row=1, column=1, padx=5, sticky=tk.W)
 
         # Configurações avançadas
         advanced_frame = ttk.LabelFrame(main_frame, text="Configurações Avançadas de Corte", padding=10)
@@ -246,12 +264,14 @@ class VideoProcessorApp:
         self.process_btn = ttk.Button(btn_frame, text="Processar Vídeo", command=self._process_video)
         self.process_btn.pack(side=tk.LEFT, padx=5)
 
-        self.preview_btn = ttk.Button(btn_frame, text="Pré-visualizar Último Clip", 
-                                     command=self._preview_last_clip, state=tk.DISABLED)
+        self.preview_btn = ttk.Button(btn_frame, text="Pré-visualizar Último Clip", command=self._preview_last_clip, state=tk.DISABLED)
         self.preview_btn.pack(side=tk.LEFT, padx=5)
 
         self.progress = ttk.Progressbar(btn_frame, orient=tk.HORIZONTAL, mode='determinate')
         self.progress.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        ttk.Button(btn_frame, text="Salvar Config", command=self._save_settings).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Carregar Config", command=self._load_settings).pack(side=tk.LEFT, padx=5)
 
         self.cancel_btn = ttk.Button(btn_frame, text="Cancelar", 
                                     command=self._cancel_processing, state=tk.DISABLED)
@@ -278,6 +298,15 @@ class VideoProcessorApp:
         value_label = ttk.Label(parent, text=str(initial))
         value_label.grid(row=row, column=2)
         slider.config(command=lambda v: value_label.config(text=f"{float(v):.1f}"))
+        
+        # Adicione atribuição dinâmica baseada no label_text
+        if "Limiar" in label_text:
+            self.silence_threshold_slider = slider
+        elif "Duração Mínima" in label_text:
+            self.min_silence_len_slider = slider
+        elif "Margem Segurança" in label_text:
+            self.safety_margin_slider = slider
+        
         return slider
 
     def _create_subtitle_settings(self, parent):
@@ -298,14 +327,12 @@ class VideoProcessorApp:
         
         # Cores e posição
         ttk.Label(frame, text="Cor do texto:").grid(row=2, column=0, sticky=tk.W)
-        self.font_color = ttk.Combobox(frame, values=['white', 'yellow', 'red', 'green', 'blue', 'black'], 
-                                     state="readonly")
+        self.font_color = ttk.Combobox(frame, values=['white', 'yellow', 'red', 'green', 'blue', 'black'], state="readonly")
         self.font_color.set('yellow')
         self.font_color.grid(row=2, column=1, padx=5, sticky=tk.W)
         
         ttk.Label(frame, text="Cor do contorno:").grid(row=3, column=0, sticky=tk.W)
-        self.stroke_color = ttk.Combobox(frame, values=['black', 'white', 'red', 'green', 'blue', 'none'], 
-                                       state="readonly")
+        self.stroke_color = ttk.Combobox(frame, values=['black', 'white', 'red', 'green', 'blue', 'none'], state="readonly")
         self.stroke_color.set('black')
         self.stroke_color.grid(row=3, column=1, padx=5, sticky=tk.W)
         
@@ -352,6 +379,8 @@ class VideoProcessorApp:
         if filepath:
             self.video_path_entry.delete(0, tk.END)
             self.video_path_entry.insert(0, filepath)
+            # Atualiza automaticamente o último vídeo usado nas configurações
+            self._save_auto_settings()
 
     def _log_message(self, message):
         """Adiciona mensagem ao log"""
@@ -382,10 +411,11 @@ class VideoProcessorApp:
         settings = {
             'whisper_model': self.model_combo.get(),
             'clip_duration': int(self.duration_entry.get()),
+            'use_gpu': self.use_gpu_var.get(),
             'temp_dir': os.path.join(os.getcwd(), "temp"),
-            'silence_threshold': -40,
-            'min_silence_len': 1.0,
-            'safety_margin': 0.5,
+            'silence_threshold': float(self.silence_threshold_slider.get()),
+            'min_silence_len': float(self.min_silence_len_slider.get()),
+            'safety_margin': float(self.safety_margin_slider.get()),
             'add_subtitles': self.add_subtitles_var.get()
         }
 
@@ -418,8 +448,9 @@ class VideoProcessorApp:
             
             if settings['add_subtitles']:
                 self.progress_queue.put(("log", "Carregando modelo Whisper..."))
-                self.model = whisper.load_model(settings['whisper_model'])
-                self.progress_queue.put(("log", f"Modelo {settings['whisper_model']} carregado com sucesso!"))
+                device = "cuda" if settings.get('use_gpu', False) else "cpu"
+                self.model = whisper.load_model(settings['whisper_model'], device=device)
+                self.progress_queue.put(("log", f"Modelo {settings['whisper_model']} carregado com sucesso no dispositivo {device.upper()}!"))
             
             processor = VideoProcessor(settings, self.temp_manager)
             
@@ -483,6 +514,7 @@ class VideoProcessorApp:
 
             if not self.stop_event.is_set():
                 self.progress_queue.put(("complete", None))
+                self._save_auto_settings()  # Salva configurações após processamento bem-sucedido
             
         except Exception as e:
             self.progress_queue.put(("error", str(e)))
@@ -595,6 +627,123 @@ class VideoProcessorApp:
             self.stop_event.set()
             self._log_message("Cancelando processamento...")
             self.cancel_btn.config(state=tk.DISABLED)
+
+    def _get_current_settings(self):
+        """Retorna um dicionário com todas as configurações atuais"""
+        return {
+            'whisper_model': self.model_combo.get(),
+            'clip_duration': int(self.duration_entry.get()),
+            'use_gpu': self.use_gpu_var.get(),
+            'silence_threshold': float(self.silence_threshold_slider.get()),
+            'min_silence_len': float(self.min_silence_len_slider.get()),
+            'safety_margin': float(self.safety_margin_slider.get()),
+            'add_subtitles': self.add_subtitles_var.get(),
+            'font': self.font_combo.get(),
+            'font_size': int(self.font_size.get()),
+            'font_color': self.font_color.get(),
+            'stroke_color': self.stroke_color.get(),
+            'position': self.sub_position.get(),
+            'last_video_path': self.video_path_entry.get()
+        }
+
+    def _save_auto_settings(self):
+        """Salva as configurações automaticamente no arquivo padrão"""
+        try:
+            settings = self._get_current_settings()
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump(settings, f, indent=4)
+        except Exception as e:
+            print(f"Erro ao salvar configurações automáticas: {e}")
+
+    def _load_auto_settings(self):
+        """Carrega as configurações automaticamente do arquivo padrão"""
+        try:
+            if os.path.exists(CONFIG_FILE):
+                with open(CONFIG_FILE, 'r') as f:
+                    settings = json.load(f)
+                
+                # Aplica as configurações sem lançar erros se algum campo estiver faltando
+                self.model_combo.set(settings.get('whisper_model', 'medium'))
+                self.duration_entry.delete(0, tk.END)
+                self.duration_entry.insert(0, str(settings.get('clip_duration', 45)))
+                self.use_gpu_var.set(settings.get('use_gpu', False))
+                self.silence_threshold_slider.set(settings.get('silence_threshold', -40))
+                self.min_silence_len_slider.set(settings.get('min_silence_len', 1.0))
+                self.safety_margin_slider.set(settings.get('safety_margin', 0.5))
+                self.add_subtitles_var.set(settings.get('add_subtitles', True))
+                self.font_combo.set(settings.get('font', 'Arial'))
+                self.font_size.delete(0, tk.END)
+                self.font_size.insert(0, str(settings.get('font_size', 62)))
+                self.font_color.set(settings.get('font_color', 'yellow'))
+                self.stroke_color.set(settings.get('stroke_color', 'black'))
+                self.sub_position.set(settings.get('position', 'bottom'))
+                
+                # Carrega o último vídeo usado, se existir
+                last_video = settings.get('last_video_path', '')
+                if last_video and os.path.exists(last_video):
+                    self.video_path_entry.delete(0, tk.END)
+                    self.video_path_entry.insert(0, last_video)
+                
+                self._log_message("Configurações anteriores carregadas automaticamente")
+        except Exception as e:
+            print(f"Erro ao carregar configurações automáticas: {e}")
+
+    def _save_settings(self):
+        """Salva as configurações em um arquivo JSON escolhido pelo usuário"""
+        settings = self._get_current_settings()
+        
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON Files", "*.json")],
+            title="Salvar Configurações",
+            initialdir=CONFIG_DIR
+        )
+        
+        if filepath:
+            try:
+                with open(filepath, 'w') as f:
+                    json.dump(settings, f, indent=4)
+                self._log_message(f"Configurações salvas em: {filepath}")
+            except Exception as e:
+                messagebox.showerror("Erro", f"Falha ao salvar configurações: {str(e)}")
+
+    def _load_settings(self):
+        """Carrega configurações de um arquivo JSON"""
+        filepath = filedialog.askopenfilename(
+            filetypes=[("JSON Files", "*.json")],
+            title="Carregar Configurações",
+            initialdir=CONFIG_DIR
+        )
+        
+        if filepath:
+            try:
+                with open(filepath, 'r') as f:
+                    settings = json.load(f)
+                
+                # Aplica as configurações
+                self.model_combo.set(settings.get('whisper_model', 'medium'))
+                self.duration_entry.delete(0, tk.END)
+                self.duration_entry.insert(0, str(settings.get('clip_duration', 45)))
+                self.use_gpu_var.set(settings.get('use_gpu', False))
+                self.silence_threshold_slider.set(settings.get('silence_threshold', -40))
+                self.min_silence_len_slider.set(settings.get('min_silence_len', 1.0))
+                self.safety_margin_slider.set(settings.get('safety_margin', 0.5))
+                self.add_subtitles_var.set(settings.get('add_subtitles', True))
+                self.font_combo.set(settings.get('font', 'Arial'))
+                self.font_size.delete(0, tk.END)
+                self.font_size.insert(0, str(settings.get('font_size', 62)))
+                self.font_color.set(settings.get('font_color', 'yellow'))
+                self.stroke_color.set(settings.get('stroke_color', 'black'))
+                self.sub_position.set(settings.get('position', 'bottom'))
+                
+                self._log_message(f"Configurações carregadas de: {filepath}")
+            except Exception as e:
+                messagebox.showerror("Erro", f"Falha ao carregar configurações: {str(e)}")
+
+    def _on_close(self):
+        """Executado quando a janela está fechando"""
+        self._save_auto_settings()
+        self.root.destroy()
 
 
 if __name__ == "__main__":
