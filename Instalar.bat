@@ -17,8 +17,7 @@ if %errorlevel% neq 0 (
 )
 
 echo Instalando as dependências do Python...
-pip install whisper moviepy pydub matplotlib ffmpeg-python
-
+pip install torch torchaudio torchvision openai-whisper moviepy pydub matplotlib ffmpeg-python
 :: Baixar e configurar o FFmpeg
 echo Baixando FFmpeg...
 curl -L "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -o ffmpeg.zip
