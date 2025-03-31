@@ -16,10 +16,8 @@ if %errorlevel% neq 0 (
     exit
 )
 
-:: Atualizar o pip e instalar dependências
 echo Instalando as dependências do Python...
-python -m pip install --upgrade pip
-pip install whisper moviepy pydub ffmpeg-python --quiet
+pip install whisper moviepy pydub matplotlib ffmpeg-python
 
 :: Baixar e configurar o FFmpeg
 echo Baixando FFmpeg...
