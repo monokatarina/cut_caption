@@ -32,6 +32,7 @@ FFmpeg (must be in system PATH)
 The following Python packages:
 
 Copy
+matplotlib
 whisper
 moviepy
 pydub
@@ -118,6 +119,7 @@ FFmpeg (deve estar no PATH do sistema)
 Os seguintes pacotes Python:
 
 Copy
+matplotlib
 whisper
 moviepy
 pydub
