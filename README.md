@@ -56,7 +56,7 @@ Run the application:
 
 bash
 Copy
-python video_processor.py
+python cut_caption.py
 In the GUI:
 
 Select your input video file
@@ -143,7 +143,7 @@ Execute a aplicação:
 
 bash
 Copy
-python video_processor.py
+python cut_caption.py
 Na interface gráfica:
 
 Selecione seu arquivo de vídeo
