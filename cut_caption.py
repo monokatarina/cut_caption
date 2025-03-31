@@ -13,8 +13,6 @@ import queue
 import tempfile
 import shutil
 import atexit
-import matplotlib.font_manager as fm
-
 
 class TempFileManager:
     """Gerenciador de arquivos temporários com limpeza automática"""
@@ -238,7 +236,7 @@ class VideoProcessorApp:
         # Área de log
         ttk.Label(main_frame, text="Log de Execução:").grid(row=5, column=0, sticky=tk.W)
         self.log_text = tk.Text(main_frame, height=15, width=70)
-        self.log_text.grid(row=6, column=0, columnspan=3, sticky=tk.EW, pady=10)
+        self.log_text.grid(row=3, column=0, columnspan=3, sticky=tk.EW, pady=10)
 
         # Botões de controle
         btn_frame = ttk.Frame(main_frame)
