@@ -1,4 +1,4 @@
-# Requirements for Video Processor / Processador de Vídeo
+# Requirements
 whisper==1.1.10
 moviepy==1.0.3
 pydub==0.25.1
@@ -9,3 +9,4 @@ torch==2.1.2
 torchaudio==2.1.2
 openai-whisper==20231117
 pillow==10.1.0
+matplotlib 
