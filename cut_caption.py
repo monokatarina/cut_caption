@@ -13,6 +13,7 @@ import queue
 import tempfile
 import shutil
 import atexit
+import matplotlib.font_manager as fm
 
 class TempFileManager:
     """Gerenciador de arquivos temporários com limpeza automática"""
