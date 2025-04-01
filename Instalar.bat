@@ -16,8 +16,12 @@ if %errorlevel% neq 0 (
     exit
 )
 
-echo Instalando as dependências do Python...
-pip install torch torchaudio torchvision openai-whisper moviepy pydub matplotlib ffmpeg-python
+:: Atualizar pip
+python -m pip install --upgrade pip
+
+:: Instalar pacotes necessários
+pip install moviepy whisper pydub tk matplotlib pillow imageio-ffmpeg
+
 :: Baixar e configurar o FFmpeg
 echo Baixando FFmpeg...
 curl -L "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -o ffmpeg.zip
@@ -30,6 +34,7 @@ if exist ffmpeg.zip (
     echo Não foi possível baixar o FFmpeg automaticamente.
     echo Baixe manualmente em: https://ffmpeg.org/download.html
 )
+
 
 :: Criar atalho para o programa
 echo Criando atalho...
