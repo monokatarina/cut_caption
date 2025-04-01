@@ -1,7 +1,7 @@
 import os
 import subprocess
 import whisper
-from moviepy import VideoFileClip, CompositeVideoClip, TextClip
+from moviepy import VideoFileClip, CompositeVideoClip, TextClip, VideoClip
 from collections import Counter
 import re
 import tkinter as tk
@@ -13,9 +13,10 @@ import queue
 import tempfile
 import shutil
 import atexit
-import matplotlib.font_manager as fm
 import json
 from pathlib import Path
+import matplotlib.font_manager as fm
+from PIL import ImageFont, ImageDraw
 
 # Configurações constantes
 CONFIG_DIR = os.path.join(Path.home(), ".video_processor")
@@ -50,12 +51,173 @@ class TempFileManager:
         except Exception as e:
             print(f"Erro ao remover diretório temporário {self.temp_dir}: {e}")
 
-
+class FontManager:
+    def __init__(self):
+        self.system_fonts = self._load_windows_fonts()
+        self._test_fallback_fonts()
+    
+    def _test_fallback_fonts(self):
+        """Testa fontes de fallback para garantir que pelo menos uma funciona"""
+        self.fallback_fonts = [
+            'Liberation-Sans', 'DejaVu-Sans', 'FreeSans', 
+            'Verdana', 'Arial', 'Arial-Unicode-MS'
+        ]
+        
+        for font in self.fallback_fonts:
+            if self.is_font_available(font):
+                self.default_font = font
+                return
+        self.default_font = None
+        
+    def get_default_font(self):
+        """Retorna uma fonte padrão que sabemos que funciona"""
+        return self.default_font or 'Liberation-Sans'
+    
+    def _load_windows_fonts(self):
+        """Carrega apenas as fontes do Windows de forma direta"""
+        try:
+            # Lista direta das fontes mais comuns no Windows
+            common_windows_fonts = [
+                'Arial', 'Calibri', 'Cambria', 'Candara', 'Comic Sans MS', 
+                'Consolas', 'Constantia', 'Corbel', 'Courier New', 
+                'Georgia', 'Impact', 'Lucida Console', 'Lucida Sans Unicode',
+                'Microsoft Sans Serif', 'Palatino Linotype', 'Segoe UI', 
+                'Tahoma', 'Times New Roman', 'Trebuchet MS', 'Verdana'
+            ]
+            
+            # Filtra apenas as fontes que realmente existem no sistema
+            available_fonts = []
+            for font in common_windows_fonts:
+                try:
+                    font_path = fm.findfont(font, fallback_to_default=False)
+                    if os.path.exists(font_path):
+                        available_fonts.append(font)
+                except:
+                    continue
+            
+            return sorted(available_fonts)
+            
+        except:
+            # Fallback básico se algo der errado
+            return ['Arial', 'Courier New', 'Times New Roman', 'Verdana']
+    
+    def get_available_fonts(self):
+        """Retorna apenas as fontes do Windows disponíveis"""
+        return self.system_fonts
+    
+    def get_font_path(self, font_name):
+        """Retorna o caminho da fonte no sistema com fallback robusto"""
+        try:
+            # Tentativa principal
+            font_path = fm.findfont(font_name, fallback_to_default=False)
+            if os.path.exists(font_path):
+                return font_path
+            
+            # Fallback 1: Tentar encontrar a fonte sem exceções
+            font_path = fm.findfont(font_name.replace(' ', '-'), fallback_to_default=False)
+            if os.path.exists(font_path):
+                return font_path
+                
+            # Fallback 2: Tentar variações comuns
+            variations = {
+                'Arial': ['arial', 'arial.ttf', 'Arial.ttf'],
+                'Courier New': ['cour', 'cour.ttf'],
+                'Times New Roman': ['times', 'times.ttf'],
+                'Verdana': ['verdana', 'verdana.ttf']
+            }
+            
+            if font_name in variations:
+                for variation in variations[font_name]:
+                    try:
+                        path = fm.findfont(variation, fallback_to_default=False)
+                        if os.path.exists(path):
+                            return path
+                    except:
+                        continue
+            
+            # Fallback final: Arial ou fonte padrão do sistema
+            return fm.findfont('Arial')
+            
+        except Exception as e:
+            print(f"Erro ao encontrar fonte {font_name}: {e}")
+            return fm.findfont('Arial')
+    
+    def is_font_available(self, font_name):
+        """Verifica se uma fonte pode ser carregada"""
+        try:
+            font_path = self.get_font_path(font_name)
+            # Testa se a fonte pode ser carregada pelo PIL
+            test_font = ImageFont.truetype(font_path, 10)
+            return test_font is not None
+        except:
+            return False
 class VideoProcessor:
-    def __init__(self, config, temp_manager):
+    def __init__(self, config, temp_manager, font_manager):
         self.config = config
         self.temp_manager = temp_manager
-
+        self.font_manager = font_manager  # Adicionar referência ao FontManager
+        
+    def check_fonts(self):
+        """Verifica fontes disponíveis e exibe no log"""
+        test_fonts = ['Arial', 'Liberation-Sans', 'DejaVu-Sans', 'Verdana']
+        available = []
+        for font in test_fonts:
+            if self.font_manager.is_font_available(font):
+                available.append(font)
+        
+        print(f"Fontes disponíveis: {', '.join(available) if available else 'Nenhuma fonte encontrada'}")
+        print(f"Usando fonte padrão: {self.font_manager.get_default_font()}")
+    
+    def _create_text_clip(self, text, font_name, font_size, video_width, color='white', stroke_color='black', stroke_width=1):
+        """Cria um TextClip com tratamento robusto de erros de fonte"""
+        try:
+            font_size = int(font_size)
+            stroke_width = int(stroke_width) if stroke_width else 0
+            font_path = self.font_manager.get_font_path(font_name)
+            
+            if not font_path or not os.path.exists(font_path):
+                raise ValueError(f"Fonte {font_name} não encontrada")
+            
+            # Configurações do stroke (contorno)
+            stroke_settings = {}
+            if stroke_color.lower() != 'none':
+                stroke_settings = {
+                    'stroke_color': stroke_color,
+                    'stroke_width': stroke_width
+                }
+            
+            # Garantir que video_width seja inteiro
+            width = int(video_width * 0.9)
+            
+            return TextClip(
+                text=text,
+                font=font_path,
+                font_size=font_size,  # CORREÇÃO: usar font_size em vez de fontsize
+                size=(width, None),
+                color=color,
+                method='caption',
+                **stroke_settings
+            )
+        except Exception as e:
+            print(f"Erro ao criar TextClip ({str(e)}), usando configurações mínimas")
+            # Fallback seguro com valores inteiros explícitos
+            try:
+                return TextClip(
+                    text=text,
+                    font_size=24,  # Tamanho fixo para fallback
+                    size=(int(video_width * 0.9), None),
+                    color=color,
+                    font='Liberation-Sans'  # Fonte alternativa mais confiável
+                )
+            except Exception as fallback_error:
+                print(f"Erro no fallback: {fallback_error}")
+                # Último recurso - sem fonte especificada
+                return TextClip(
+                    text=text,
+                    font_size=24,
+                    size=(int(video_width * 0.9), None),
+                    color=color
+                )
     def find_interesting_segments(self, video_path):
         """Encontra segmentos interessantes baseado em análise de áudio"""
         try:
@@ -76,10 +238,10 @@ class VideoProcessor:
                 start = max(0, (start - margin))
                 end = min(len(audio), (end + margin))
                 
-                if end - start < 2:
+                if end - start < 2000:  # Pelo menos 2 segundos
                     continue
                     
-                moments.append(start)
+                moments.append(start / 1000)  # Converter para segundos
             
             if not moments:
                 return self._fallback_segments(video_path)
@@ -89,11 +251,102 @@ class VideoProcessor:
             print(f"Erro ao analisar áudio: {e}")
             return self._fallback_segments(video_path)
 
+    def _create_animated_text(self, text, duration, font_name, font_size, color, stroke_color, stroke_width, video_width):
+        """Cria um texto com animação de digitação com destaque na palavra atual"""
+        try:
+            font_path = self.font_manager.get_font_path(font_name)
+            if not font_path or not os.path.exists(font_path):
+                font_path = self.font_manager.get_font_path(self.font_manager.get_default_font())
+            
+            # Configurações
+            highlight_color = '#FFFF00'  # Amarelo para destacar
+            base_color = color
+            stroke_settings = {
+                'stroke_color': stroke_color,
+                'stroke_width': int(stroke_width) if stroke_width else 1
+            } if stroke_color and stroke_color.lower() != 'none' else {}
+            
+            # Divide o texto em palavras mantendo espaços e pontuação
+            words = re.findall(r'\w+|\s+|[^\w\s]', text)
+            
+            # Cria clips base
+            base_clip_normal = TextClip(
+                "", font=font_path, font_size=int(font_size),
+                color=base_color, size=(int(video_width * 0.9), None),
+                method='caption', **stroke_settings
+            )
+            
+            base_clip_highlight = TextClip(
+                "", font=font_path, font_size=int(font_size),
+                color=highlight_color, size=(int(video_width * 0.9), None),
+                method='caption', **stroke_settings
+            )
+            
+            # Calcula tempo por palavra
+            total_words = len([w for w in words if w.strip()])
+            words_per_second = max(1, total_words/duration)
+            
+            def make_frame(t):
+                current_word_idx = min(len(words), int(t * words_per_second))
+                if current_word_idx < len(words):
+                    # Suaviza a transição entre palavras
+                    progress = (t * words_per_second) - current_word_idx
+                    if progress > 0.8:  # Começa a mostrar a próxima palavra nos últimos 20% do tempo
+                        current_word_idx += 1
+                displayed_words = words[:current_word_idx]
+                
+                # Separa as palavras já exibidas da palavra atual (se houver)
+                normal_text = ''.join(displayed_words[:-1]) if current_word_idx > 0 else ""
+                current_word = displayed_words[-1] if current_word_idx > 0 else ""
+                
+                # Cria os clips separados
+                if normal_text:
+                    normal_clip = base_clip_normal.with_text(normal_text)
+                    frame = normal_clip.get_frame(t)
+                else:
+                    frame = base_clip_normal.with_text("").get_frame(t)
+                
+                if current_word:
+                    # Posiciona o clip da palavra destacada
+                    if normal_text:
+                        # Calcula a posição X da palavra atual
+                        temp_clip = base_clip_normal.with_text(normal_text)
+                        try:
+                            normal_width = temp_clip.size[0]
+                        except:
+                            normal_width = len(normal_text) * font_size * 0.6  # Fallback aproximado
+                        current_word_clip = base_clip_highlight.with_text(current_word)
+                        highlight_frame = current_word_clip.get_frame(t)
+                        
+                        # Desenha a palavra destacada na posição correta
+                        x_offset = normal_width
+                        frame[x_offset:x_offset+current_word_clip.size[0], :] = highlight_frame
+                    else:
+                        # Primeira palavra
+                        current_word_clip = base_clip_highlight.with_text(current_word)
+                        frame = current_word_clip.get_frame(t)
+                
+                # Adiciona cursor piscante (opcional)
+                if int(t * 2) % 2 == 0 and current_word_idx < len(words):
+                    cursor = base_clip_highlight.with_text("|").get_frame(t)
+                    cursor_x = frame.shape[1] - 20  # Posição do cursor
+                    frame[cursor_x:cursor_x+10, :] = cursor[:, :10]
+                
+                return frame
+                
+            animated_text = VideoClip(make_frame, duration=duration)
+            return animated_text.crossfadein(0.3).crossfadeout(0.3)
+            
+        except Exception as e:
+            print(f"Erro na animação avançada: {e}")
+            return self._create_text_clip(text, font_name, font_size, video_width, color, stroke_color, stroke_width)
     def _fallback_segments(self, video_path):
         """Método alternativo caso a análise de áudio falhe"""
         try:
             with VideoFileClip(video_path) as clip:
-                return [i for i in range(0, int(clip.duration), self.config['clip_duration'])]
+                duration = clip.duration
+                clip_duration = self.config.get('clip_duration', 45)
+                return [i for i in range(0, int(duration), clip_duration)]
         except Exception as e:
             print(f"Erro no fallback: {e}")
             return [0]
@@ -124,45 +377,81 @@ class VideoProcessor:
             raise
 
     def add_subtitles_to_video(self, video_path, output_path, segments, subtitle_config):
-        """Adiciona legendas ao vídeo com configurações personalizadas."""
+        """Adiciona legendas ao vídeo com tratamento robusto de fontes"""
         try:
             with VideoFileClip(video_path) as video:
-                font = subtitle_config.get('font', 'Arial')
-                font_size = subtitle_config.get('font_size', 62)
-                font_color = subtitle_config.get('font_color', 'yellow')
-                stroke_color = subtitle_config.get('stroke_color', 'black')
-                stroke_width = subtitle_config.get('stroke_width', 1.5)
-                position = subtitle_config.get('position', 'bottom')
-
                 subtitle_clips = []
                 for segment in segments:
-                    txt_clip = TextClip(
-                        text=segment["text"],
-                        font=font,
-                        fontsize=font_size,
-                        color=font_color,
-                        stroke_color=stroke_color,
-                        stroke_width=stroke_width,
-                        size=(int(video.w * 0.9), None),
-                        method='caption'
-                    )
-                    
-                    if position == 'top':
-                        pos = ('center', 50)
-                    elif position == 'middle':
-                        pos = ('center', 'center')
-                    else:
-                        pos = ('center', video.h - 100)
+                    try:
+                        # Configurações com fallback
+                        font = subtitle_config.get('font', 'Arial')
+                        font_size = int(subtitle_config.get('font_size', 24))
+                        color = subtitle_config.get('font_color', 'white')
+                        stroke_color = subtitle_config.get('stroke_color', 'black')
+                        stroke_width = int(subtitle_config.get('stroke_width', 1))
+                        use_animation = subtitle_config.get('animation', False)
                         
-                    subtitle_clip = txt_clip.set_start(segment["start"]).set_duration(segment["end"] - segment["start"])
-                    subtitle_clip = subtitle_clip.set_position(pos)
-                    subtitle_clips.append(subtitle_clip)
+                        if use_animation:
+                            text_clip = self._create_animated_text(
+                                text=segment["text"],
+                                duration=segment["end"] - segment["start"],
+                                font_name=font,
+                                font_size=font_size,
+                                color=color,
+                                stroke_color=stroke_color,
+                                stroke_width=stroke_width,
+                                video_width=video.w
+                            )
+                        else:
+                            text_clip = self._create_text_clip(
+                                text=segment["text"],
+                                font_name=font,
+                                font_size=font_size,
+                                video_width=video.w,
+                                color=color,
+                                stroke_color=stroke_color,
+                                stroke_width=stroke_width
+                            )
+                        
+                        position = self._get_subtitle_position(
+                            subtitle_config.get('position', 'bottom'),
+                            video.h
+                        )
+                        
+                        subtitle_clip = text_clip.with_position(position).with_start(segment["start"])
+                        if not use_animation:
+                            subtitle_clip = subtitle_clip.with_duration(segment["end"] - segment["start"])
+                        
+                        subtitle_clips.append(subtitle_clip)
+                    except Exception as e:
+                        print(f"Erro ao criar legenda para segmento: {str(e)}")
+                        continue
 
-                final_video = CompositeVideoClip([video, *subtitle_clips])
-                final_video.write_videofile(output_path, codec="libx264", audio_codec="aac", fps=video.fps)
+                if subtitle_clips:
+                    final_video = CompositeVideoClip([video] + subtitle_clips)
+                    final_video.write_videofile(
+                        output_path,
+                        codec="libx264",
+                        audio_codec="aac",
+                        fps=video.fps,
+                        threads=4,
+                        preset='medium',  # Melhor qualidade que 'fast'
+                        bitrate="8000k",  # Ajuste conforme necessário
+                        ffmpeg_params=['-crf', '18']  # Qualidade visual (18-28 é bom)
+                    )
+                else:
+                    raise ValueError("Nenhuma legenda pôde ser criada")
         except Exception as e:
             print(f"Erro ao adicionar legendas: {e}")
             raise
+    def _get_subtitle_position(self, position, video_height):
+        """Retorna a posição das legendas baseado na configuração"""
+        if position == 'top':
+            return ('center', 50)
+        elif position == 'middle':
+            return ('center', 'center')
+        else:  # bottom
+            return ('center', video_height - 100)
 
     def _extract_audio_to_wav(self, video_path, temp_audio_path):
         """Extrai áudio do vídeo para arquivo WAV temporário"""
@@ -184,22 +473,57 @@ class VideoProcessor:
             print("Tempo limite excedido para extração de áudio")
             raise
 
-
 class VideoProcessorApp:
     def __init__(self, root):
         self.root = root
-        self._setup_ui()
-        self._initialize_variables()
+        self.app_dir = os.path.dirname(os.path.abspath(__file__))
+        self.config = {}  # Configurações padrão
+        self.temp_manager = TempFileManager()
+        self.font_manager = FontManager()
         
-        # Criar diretório de configuração se não existir
+        # Garante que o diretório de configuração existe
         os.makedirs(CONFIG_DIR, exist_ok=True)
         
-        # Carregar configurações automaticamente ao iniciar
-        self._load_auto_settings()
+        # Cria arquivo de configuração padrão se não existir
+        if not os.path.exists(CONFIG_FILE):
+            self._create_default_config()
         
-        # Configurar para salvar quando fechar a janela
+        self._setup_ui()
+        self._initialize_variables()
+        self._load_auto_settings()  # Carrega as configurações existentes
+        
         root.protocol("WM_DELETE_WINDOW", self._on_close)
-        
+
+    def _create_default_config(self):
+        """Cria um arquivo de configuração padrão"""
+        default_config = {
+            'whisper_model': 'medium',
+            'clip_duration': 45,
+            'use_gpu': False,
+            'silence_threshold': -40,
+            'min_silence_len': 1.0,
+            'safety_margin': 0.5,
+            'add_subtitles': True,
+            'font': 'Arial',
+            'font_size': 24,
+            'font_color': 'white',
+            'stroke_color': 'black',
+            'position': 'bottom',
+            'last_video_path': '',
+            'animation': True,
+            'highlight_color': '#FFFF00',
+            'animation_style': 'Digitação com Destaque'
+        }
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(default_config, f, indent=4)
+    def _initialize_variables(self):
+        """Inicializa variáveis e gerenciadores"""
+        self.model = None
+        self.progress_queue = queue.Queue()
+        self.processing_thread = None
+        self.stop_event = threading.Event()
+        self.last_clip_path = None
+
     def _setup_ui(self):
         """Configura a interface gráfica"""
         self.style = ttk.Style()
@@ -281,15 +605,6 @@ class VideoProcessorApp:
         advanced_frame.columnconfigure(1, weight=1)
         self.subtitle_frame.columnconfigure(1, weight=1)
 
-    def _initialize_variables(self):
-        """Inicializa variáveis e gerenciadores"""
-        self.temp_manager = TempFileManager()
-        self.model = None
-        self.progress_queue = queue.Queue()
-        self.processing_thread = None
-        self.stop_event = threading.Event()
-        self.last_clip_path = None
-
     def _create_slider(self, parent, label_text, row, from_, to, initial):
         """Cria um slider com label e valor exibido"""
         ttk.Label(parent, text=label_text).grid(row=row, column=0, sticky=tk.W)
@@ -310,55 +625,93 @@ class VideoProcessorApp:
         return slider
 
     def _create_subtitle_settings(self, parent):
-        """Cria o frame de configurações de legendas"""
+        """Configurações completas de legendas"""
         frame = ttk.LabelFrame(parent, text="Configurações de Legendas", padding=10)
         
+        # Adicione controles para a animação
+        ttk.Label(frame, text="Estilo de Animação:").grid(row=7, column=0, sticky=tk.W)
+        self.animation_style = ttk.Combobox(frame, values=[
+            'Digitação Simples', 
+            'Digitação com Destaque', 
+            'Digitação com Cursor'
+        ], state="readonly")
+        self.animation_style.set('Digitação com Destaque')
+        self.animation_style.grid(row=7, column=1 , padx=5, sticky=tk.W)
+        # Cor do destaque
+        ttk.Label(frame, text="Cor de Destaque:").grid(row=6, column=0, sticky=tk.W)
+        self.highlight_color = ttk.Combobox(frame, values=[
+            '#FFFF00', '#FF0000', '#00FF00', '#0000FF', '#FFFFFF'
+        ], state="readonly")
+        self.highlight_color.set('#FFFF00')
+        self.highlight_color.grid(row=6, column=1, padx=5, sticky=tk.W)
+        # Adicione este novo controle no final:
+        ttk.Label(frame, text="Animação:").grid(row=5, column=0, sticky=tk.W)
+        self.animation_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(frame, text="Ativar animação", variable=self.animation_var).grid(row=5, column=1, sticky=tk.W)
         # Configurações de fonte
         ttk.Label(frame, text="Fonte:").grid(row=0, column=0, sticky=tk.W)
-        self.font_combo = ttk.Combobox(frame, state="readonly", style='Font.TCombobox')
+        self.font_combo = ttk.Combobox(frame, state="readonly")
+        self.font_combo['values'] = self.font_manager.get_available_fonts()
+        self.font_combo.set('Arial' if 'Arial' in self.font_combo['values'] else self.font_combo['values'][0])
         self.font_combo.grid(row=0, column=1, padx=5, sticky=tk.EW)
-        self.font_combo.bind('<<ComboboxSelected>>', self._update_font_style)
         
         # Tamanho da fonte
         ttk.Label(frame, text="Tamanho:").grid(row=1, column=0, sticky=tk.W)
-        self.font_size = ttk.Spinbox(frame, from_=8, to=120, width=5)
-        self.font_size.set(62)
+        self.font_size = ttk.Spinbox(frame, from_=8, to=72, width=5)
+        self.font_size.set(24)
         self.font_size.grid(row=1, column=1, padx=5, sticky=tk.W)
         
-        # Cores e posição
+        # Cor do texto
         ttk.Label(frame, text="Cor do texto:").grid(row=2, column=0, sticky=tk.W)
-        self.font_color = ttk.Combobox(frame, values=['white', 'yellow', 'red', 'green', 'blue', 'black'], state="readonly")
-        self.font_color.set('yellow')
+        self.font_color = ttk.Combobox(frame, values=['white', 'yellow', 'black', 'red', 'green', 'blue'], state="readonly")
+        self.font_color.set('white')
         self.font_color.grid(row=2, column=1, padx=5, sticky=tk.W)
         
+        # Cor do contorno
         ttk.Label(frame, text="Cor do contorno:").grid(row=3, column=0, sticky=tk.W)
-        self.stroke_color = ttk.Combobox(frame, values=['black', 'white', 'red', 'green', 'blue', 'none'], state="readonly")
+        self.stroke_color = ttk.Combobox(frame, values=['black', 'white', 'none', 'red', 'green', 'blue'], state="readonly")
         self.stroke_color.set('black')
         self.stroke_color.grid(row=3, column=1, padx=5, sticky=tk.W)
         
+        # Posição
         ttk.Label(frame, text="Posição:").grid(row=4, column=0, sticky=tk.W)
         self.sub_position = ttk.Combobox(frame, values=['top', 'middle', 'bottom'], state="readonly")
         self.sub_position.set('bottom')
         self.sub_position.grid(row=4, column=1, padx=5, sticky=tk.W)
         
-        self._load_available_fonts()
         return frame
 
     def _load_available_fonts(self):
-        """Carrega as fontes disponíveis no sistema"""
+        """Carrega fontes disponíveis de forma confiável"""
         try:
-            fonts = list(set([f.name for f in fm.fontManager.ttflist]))
-            self.font_combo['values'] = sorted(fonts)
-            if 'Arial' in fonts:
-                self.font_combo.set('Arial')
-            elif fonts:
-                self.font_combo.set(fonts[0])
-            self._update_font_style()
+            all_fonts = self.font_manager.get_available_fonts()
+            
+            # Verificar disponibilidade das fontes
+            available_fonts = []
+            for font in all_fonts:
+                if self.font_manager.is_font_available(font):
+                    available_fonts.append(font)
+            
+            # Ordenar colocando as comuns primeiro
+            common_fonts = ['Arial', 'Courier New', 'Times New Roman', 'Verdana', 'Helvetica']
+            font_list = sorted(
+                available_fonts, 
+                key=lambda x: (x not in common_fonts, x)
+            )
+            
+            self.font_combo['values'] = font_list
+            
+            # Definir fonte padrão segura
+            safe_fonts = [f for f in common_fonts if f in font_list]
+            if safe_fonts:
+                self.font_combo.set(safe_fonts[0])
+            else:
+                self.font_combo.set(font_list[0] if font_list else 'Arial')
+                
         except Exception as e:
             print(f"Erro ao carregar fontes: {e}")
             self.font_combo['values'] = ['Arial']
             self.font_combo.set('Arial')
-            self._update_font_style()
 
     def _update_font_style(self, event=None):
         """Atualiza o estilo da fonte no Combobox"""
@@ -379,7 +732,6 @@ class VideoProcessorApp:
         if filepath:
             self.video_path_entry.delete(0, tk.END)
             self.video_path_entry.insert(0, filepath)
-            # Atualiza automaticamente o último vídeo usado nas configurações
             self._save_auto_settings()
 
     def _log_message(self, message):
@@ -446,13 +798,31 @@ class VideoProcessorApp:
             self.progress_queue.put(("log", "Iniciando processamento..."))
             self.progress_queue.put(("progress", 0))
             
+            # Verificar fontes disponíveis
+            processor = VideoProcessor(settings, self.temp_manager, self.font_manager)
+            processor.check_fonts()
+            
             if settings['add_subtitles']:
+                selected_font = self.font_combo.get()
+                if not self.font_manager.is_font_available(selected_font):
+                    self.progress_queue.put(("log", f"Aviso: Fonte '{selected_font}' não encontrada, usando Arial como fallback"))
+                    selected_font = 'Arial'
+                    
+                subtitle_config = {
+                    'font': self.font_combo.get(),
+                    'font_size': int(self.font_size.get()),
+                    'font_color': self.font_color.get(),
+                    'stroke_color': None if self.stroke_color.get() == 'none' else self.stroke_color.get(),
+                    'stroke_width': 1.5,
+                    'position': self.sub_position.get(),
+                    'animation': self.animation_var.get()  # Nova configuração
+                }
                 self.progress_queue.put(("log", "Carregando modelo Whisper..."))
                 device = "cuda" if settings.get('use_gpu', False) else "cpu"
                 self.model = whisper.load_model(settings['whisper_model'], device=device)
                 self.progress_queue.put(("log", f"Modelo {settings['whisper_model']} carregado com sucesso no dispositivo {device.upper()}!"))
             
-            processor = VideoProcessor(settings, self.temp_manager)
+            processor = VideoProcessor(settings, self.temp_manager, self.font_manager)
             
             video_dir = os.path.dirname(video_path)
             video_name = os.path.splitext(os.path.basename(video_path))[0]
@@ -514,36 +884,62 @@ class VideoProcessorApp:
 
             if not self.stop_event.is_set():
                 self.progress_queue.put(("complete", None))
-                self._save_auto_settings()  # Salva configurações após processamento bem-sucedido
+                self._save_auto_settings()
             
         except Exception as e:
             self.progress_queue.put(("error", str(e)))
 
     def _process_transcription_result(self, result, clip_duration):
-        """Processa o resultado da transcrição para extrair segmentos relevantes"""
+        """Processa o resultado da transcrição com tempos precisos"""
         relevant_segments = []
-        current_speaker = None
         
         for segment in result["segments"]:
             text = segment["text"].strip()
+            start = segment["start"]
+            end = segment["end"]
             
             if len(text) < 3 or text in ["...", "[música]", "[risos]"]:
                 continue
                 
-            if current_speaker is None or (segment["start"] - current_speaker["end"]) > 1.5:
-                if current_speaker:
-                    relevant_segments.append(current_speaker)
-                current_speaker = {
-                    "start": segment["start"],
-                    "end": segment["end"],
-                    "text": text
-                }
+            # Divide textos muito longos em múltiplos segmentos
+            max_duration = 5.0  # segundos por segmento
+            if (end - start) > max_duration:
+                words = text.split()
+                word_duration = (end - start) / len(words)
+                chunks = []
+                current_chunk = []
+                current_duration = 0
+                
+                for word in words:
+                    current_chunk.append(word)
+                    current_duration += word_duration
+                    
+                    if current_duration >= max_duration or word[-1] in ".!?":
+                        chunk_text = " ".join(current_chunk)
+                        chunk_end = start + current_duration
+                        chunks.append({
+                            "text": chunk_text,
+                            "start": start,
+                            "end": chunk_end
+                        })
+                        start = chunk_end
+                        current_chunk = []
+                        current_duration = 0
+                
+                if current_chunk:
+                    chunks.append({
+                        "text": " ".join(current_chunk),
+                        "start": start,
+                        "end": end
+                    })
+                    
+                relevant_segments.extend(chunks)
             else:
-                current_speaker["end"] = segment["end"]
-                current_speaker["text"] += " " + text
-        
-        if current_speaker:
-            relevant_segments.append(current_speaker)
+                relevant_segments.append({
+                    "text": text,
+                    "start": start,
+                    "end": end
+                })
         
         if not relevant_segments:
             relevant_segments = [{
@@ -643,7 +1039,10 @@ class VideoProcessorApp:
             'font_color': self.font_color.get(),
             'stroke_color': self.stroke_color.get(),
             'position': self.sub_position.get(),
-            'last_video_path': self.video_path_entry.get()
+            'last_video_path': self.video_path_entry.get(),
+            'animation': self.animation_var.get(),
+            'highlight_color': self.highlight_color.get(),
+            'animation_style': self.animation_style.get()
         }
 
     def _save_auto_settings(self):
@@ -662,50 +1061,53 @@ class VideoProcessorApp:
                 with open(CONFIG_FILE, 'r') as f:
                     settings = json.load(f)
                 
-                # Aplica as configurações sem lançar erros se algum campo estiver faltando
+                # Configurações básicas
                 self.model_combo.set(settings.get('whisper_model', 'medium'))
                 self.duration_entry.delete(0, tk.END)
                 self.duration_entry.insert(0, str(settings.get('clip_duration', 45)))
                 self.use_gpu_var.set(settings.get('use_gpu', False))
+                
+                # Sliders
                 self.silence_threshold_slider.set(settings.get('silence_threshold', -40))
                 self.min_silence_len_slider.set(settings.get('min_silence_len', 1.0))
                 self.safety_margin_slider.set(settings.get('safety_margin', 0.5))
+                
+                # Legendas
                 self.add_subtitles_var.set(settings.get('add_subtitles', True))
                 self.font_combo.set(settings.get('font', 'Arial'))
                 self.font_size.delete(0, tk.END)
-                self.font_size.insert(0, str(settings.get('font_size', 62)))
-                self.font_color.set(settings.get('font_color', 'yellow'))
+                self.font_size.insert(0, str(settings.get('font_size', 24)))
+                self.font_color.set(settings.get('font_color', 'white'))
                 self.stroke_color.set(settings.get('stroke_color', 'black'))
                 self.sub_position.set(settings.get('position', 'bottom'))
                 
-                # Carrega o último vídeo usado, se existir
+                # Animação
+                self.animation_var.set(settings.get('animation', True))
+                self.highlight_color.set(settings.get('highlight_color', '#FFFF00'))
+                self.animation_style.set(settings.get('animation_style', 'Digitação com Destaque'))
+                
+                # Último vídeo
                 last_video = settings.get('last_video_path', '')
                 if last_video and os.path.exists(last_video):
                     self.video_path_entry.delete(0, tk.END)
                     self.video_path_entry.insert(0, last_video)
                 
-                self._log_message("Configurações anteriores carregadas automaticamente")
+                self._log_message("Configurações carregadas automaticamente")
         except Exception as e:
             print(f"Erro ao carregar configurações automáticas: {e}")
+            # Se houver erro, cria um novo arquivo padrão
+            self._create_default_config()
 
     def _save_settings(self):
-        """Salva as configurações em um arquivo JSON escolhido pelo usuário"""
-        settings = self._get_current_settings()
-        
-        filepath = filedialog.asksaveasfilename(
-            defaultextension=".json",
-            filetypes=[("JSON Files", "*.json")],
-            title="Salvar Configurações",
-            initialdir=CONFIG_DIR
-        )
-        
-        if filepath:
-            try:
-                with open(filepath, 'w') as f:
-                    json.dump(settings, f, indent=4)
-                self._log_message(f"Configurações salvas em: {filepath}")
-            except Exception as e:
-                messagebox.showerror("Erro", f"Falha ao salvar configurações: {str(e)}")
+        """Salva as configurações atuais no arquivo de configuração padrão"""
+        try:
+            settings = self._get_current_settings()
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump(settings, f, indent=4)
+            self._log_message("Configurações salvas com sucesso!")
+            messagebox.showinfo("Sucesso", "Configurações salvas automaticamente!")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao salvar configurações: {str(e)}")
 
     def _load_settings(self):
         """Carrega configurações de um arquivo JSON"""
@@ -720,7 +1122,6 @@ class VideoProcessorApp:
                 with open(filepath, 'r') as f:
                     settings = json.load(f)
                 
-                # Aplica as configurações
                 self.model_combo.set(settings.get('whisper_model', 'medium'))
                 self.duration_entry.delete(0, tk.END)
                 self.duration_entry.insert(0, str(settings.get('clip_duration', 45)))
@@ -742,9 +1143,13 @@ class VideoProcessorApp:
 
     def _on_close(self):
         """Executado quando a janela está fechando"""
-        self._save_auto_settings()
-        self.root.destroy()
-
+        try:
+            self._save_settings()  # Usa o mesmo método de salvar
+            self.temp_manager.cleanup()
+            self.root.destroy()
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao fechar aplicativo: {str(e)}")
+            self.root.destroy()
 
 if __name__ == "__main__":
     root = tk.Tk()
